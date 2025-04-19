@@ -20,7 +20,7 @@ public class QuartzConfig {
     public Trigger apiDataFetchJobTrigger() {
         SimpleScheduleBuilder scheduleBuilder = SimpleScheduleBuilder
                 .simpleSchedule()
-                .withIntervalInSeconds(10) // Run every hour
+                .withIntervalInHours(1) // Run every hour
                 .repeatForever();
 
         return TriggerBuilder.newTrigger()

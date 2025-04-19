@@ -20,6 +20,8 @@ public class ApiDataFetch {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    private String payload;
+    private String location;
+    private double temperatureC;
+    private String condition;
     private LocalDateTime fetchedAt;
 }
