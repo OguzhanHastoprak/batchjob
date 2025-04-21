@@ -2,6 +2,7 @@ package com.example.batchJob.controller;
 
 import com.example.batchJob.model.ApiDataFetch;
 import com.example.batchJob.repository.ApiDataFetchRepository;
+import com.example.batchJob.service.ApiDataFetchService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -16,7 +17,12 @@ import java.util.Optional;
 @RestController
 @RequestMapping("/api/data-fetch")
 public class ApiDataFetchController {
+    private final ApiDataFetchService apiDataFetchService;
 
+    public ApiDataFetchController(ApiDataFetchService apiDataFetchService) {
+        this.apiDataFetchService = apiDataFetchService;
+    }
+    /*
     private static final Logger logger = LoggerFactory.getLogger(ApiDataFetchController.class);
 
     @Autowired
@@ -26,36 +32,12 @@ public class ApiDataFetchController {
     private RedisTemplate<String, Boolean> booleanRedisTemplate;
 
     @Autowired
-    private ApiDataFetchRepository apiDataFetchRepository;
+    private ApiDataFetchRepository apiDataFetchRepository; */
 
     @GetMapping
     public ResponseEntity<ApiDataFetch> getLatestData() {
-        try {
-            Boolean hasNewData = booleanRedisTemplate.opsForValue().get("hasNewData");
-            logger.info("hasNewData flag from Redis: {}", hasNewData);
-
-            ApiDataFetch cached = redisTemplate.opsForValue().get("latestData");
-            if (Boolean.TRUE.equals(hasNewData) || cached == null) {
-                Optional<ApiDataFetch> latestFromDb = apiDataFetchRepository.findTopByOrderByFetchedAtDesc();
-                if (latestFromDb.isPresent()) {
-                    ApiDataFetch latest = latestFromDb.get();
-                    redisTemplate.opsForValue().set("latestData", latest);
-                    booleanRedisTemplate.opsForValue().set("hasNewData", false);
-                    logger.info("Cache updated and new data served from DB: {}", latest);
-                    return ResponseEntity.ok(latest);
-                }
-            }
-
-            if (cached != null) {
-                logger.info("Returning cached data: {}", cached);
-                return ResponseEntity.ok(cached);
-            }
-
-            logger.info("No data found");
-            return ResponseEntity.noContent().build();
-        } catch (Exception e) {
-            logger.error("Error retrieving data", e);
-            return ResponseEntity.internalServerError().build();
-        }
+        return this.apiDataFetchService.getLatestData()
+                .map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.notFound().build());
     }
 }

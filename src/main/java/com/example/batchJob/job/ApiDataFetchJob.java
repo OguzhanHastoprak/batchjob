@@ -1,10 +1,14 @@
 package com.example.batchJob.job;
 
 
+import com.example.batchJob.Errors.WeatherApiException;
 import com.example.batchJob.model.ApiDataFetch;
+import com.example.batchJob.model.WeatherData;
 import com.example.batchJob.repository.ApiDataFetchRepository;
+import com.example.batchJob.service.WeatherApiService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.jsonwebtoken.security.WeakKeyException;
 import org.quartz.Job;
 import org.quartz.JobExecutionContext;
 import org.quartz.JobExecutionException;
@@ -25,67 +29,60 @@ public class ApiDataFetchJob implements Job {
 
     private static final Logger logger = LoggerFactory.getLogger(ApiDataFetchJob.class);
 
-    @Autowired
-    private ApiDataFetchRepository apiDataFetchRepository;
+    private final ApiDataFetchRepository apiDataFetchRepository;
+    private final RedisTemplate<String, Boolean> booleanRedisTemplate;
+    private final WeatherApiService weatherApiService;
 
-    @Autowired
-    private RedisTemplate<String, Boolean> booleanRedisTemplate;
-
-    //@Autowired
-    //private RedisTemplate<String, ApiDataFetch> redisTemplate;
-
-    @Autowired
-    private RestTemplate restTemplate;
-
-    @Value("${weather.api.url}")
-    private String apiUrl;
-
-    @Value("${weather.api.key}")
-    private String apiKey;
-
-    @Value("${weather.api.city}")
-    private String city;
+    public ApiDataFetchJob(ApiDataFetchRepository apiDataFetchRepository,
+                           RedisTemplate<String, Boolean> booleanRedisTemplate,
+                           WeatherApiService weatherApiService){
+        this.apiDataFetchRepository = apiDataFetchRepository;
+        this.booleanRedisTemplate = booleanRedisTemplate;
+        this.weatherApiService = weatherApiService;
+    }
 
     @Override
     public void execute(JobExecutionContext context) {
         try {
-            String url = String.format("%s?key=%s&q=%s", apiUrl, apiKey, city);
-            String response = restTemplate.getForObject(url, String.class);
-            logger.info("Fetched weather API response: {}", response);
-
-            ObjectMapper mapper = new ObjectMapper();
-            JsonNode root = mapper.readTree(response);
-
-            String location = root.path("location").path("name").asText();
-            double temperatureC = root.path("current").path("temp_c").asDouble();
-            String condition = root.path("current").path("condition").path("text").asText();
-
-            Optional<ApiDataFetch> latest = apiDataFetchRepository.findTopByOrderByFetchedAtDesc();
-            boolean isNew = latest.map(data ->
-                    !(data.getLocation().equals(location) &&
-                            data.getTemperatureC() == temperatureC &&
-                            data.getCondition().equals(condition))
-            ).orElse(true);
-
-            if (isNew) {
-                ApiDataFetch apiDataFetch = new ApiDataFetch();
-                apiDataFetch.setLocation(location);
-                apiDataFetch.setTemperatureC(temperatureC);
-                apiDataFetch.setCondition(condition);
-                apiDataFetch.setFetchedAt(LocalDateTime.now());
-                apiDataFetchRepository.save(apiDataFetch);
-
-                //redisTemplate.opsForValue().set("latestData", apiDataFetch);
-                booleanRedisTemplate.opsForValue().set("hasNewData", true);
-
-                logger.info("Saved new data to DB: {}", apiDataFetch);
-            } else {
-                logger.info("No new data fetched");
-            }
-        } catch (RestClientException e) {
-            logger.error("Error fetching data from API", e);
+            WeatherData weatherData = weatherApiService.getWeatherData();
+            processWeatherData(weatherData);
+        } catch (WeatherApiException e) {
+            logger.error("Error fetching weather data", e);
         } catch (Exception e) {
-            logger.error("Unexpected error", e);
+            logger.error("Error processing weather data", e);
         }
+    }
+
+    private void processWeatherData(WeatherData weatherData){
+        if(isNewWeatherData(weatherData)){
+            saveWeatherData(weatherData);
+            updateNewDataFlag();
+        } else {
+            logger.info("No new data");
+        }
+    }
+
+    private boolean isNewWeatherData(WeatherData weatherData){
+        Optional<ApiDataFetch> latestFromDb = apiDataFetchRepository.findTopByOrderByFetchedAtDesc();
+        return latestFromDb.map(data ->
+                !(data.getLocation().equals(weatherData.location()) && // bir sebeple şehir değişirse
+                        data.getTemperatureC() == weatherData.temperatureC() &&
+                        data.getCondition().equals(weatherData.condition()))
+        ).orElse(true);
+    }
+
+    private void saveWeatherData(WeatherData weatherData){
+        ApiDataFetch apiDataFetch = new ApiDataFetch();
+        apiDataFetch.setLocation(weatherData.location());
+        apiDataFetch.setTemperatureC(weatherData.temperatureC());
+        apiDataFetch.setCondition(weatherData.condition());
+        apiDataFetch.setFetchedAt(LocalDateTime.now());
+        apiDataFetchRepository.save(apiDataFetch);
+        logger.info("New data saved to DB: {}", apiDataFetch);
+    }
+
+    private void updateNewDataFlag(){
+        booleanRedisTemplate.opsForValue().set("hasNewData", true);
+        logger.info("New data flag updated in Redis: {}", booleanRedisTemplate.opsForValue().get("hasNewData"));
     }
 }
